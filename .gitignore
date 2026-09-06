@@ -1,0 +1,10 @@
+.idea/
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+dist/
+build/
+*.egg-info/
+reports/        # 生成的报告产物不入库
