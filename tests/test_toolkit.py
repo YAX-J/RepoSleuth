@@ -136,6 +136,7 @@ def test_langchain_tools_export():
     tools = get_langchain_tools()
     assert {t.name for t in tools} == {
         "clone_repo_tool", "repo_map_tool", "risk_scan_tool", "ingest_repo_tool",
+        "github_search_tool",
     }
     # 直接调用一次验证 JSON 输出
     sample = json.loads(

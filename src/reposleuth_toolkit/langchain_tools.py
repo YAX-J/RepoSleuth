@@ -7,7 +7,7 @@
 
 from __future__ import annotations
 
-from . import deps_tool, git_tool, ingest_tool, risk_tool
+from . import deps_tool, git_tool, github_search, ingest_tool, risk_tool
 
 try:
     from langchain_core.tools import tool
@@ -43,6 +43,17 @@ def ingest_repo_tool(repo_path: str, max_total_chars: int = 200_000) -> str:
     return ingest_tool.ingest_repo(repo_path, max_total_chars=max_total_chars).model_dump_json()
 
 
+@tool
+def github_search_tool(query: str, max_results: int = 8) -> str:
+    """按关键词搜索 GitHub 仓库（含限流退避）。返回 RepoCandidate JSON 数组；限流时抛 GitHubSearchError。"""
+    import json as _json
+
+    return _json.dumps(
+        [c.model_dump() for c in github_search.search_repos(query, max_results=max_results)],
+        ensure_ascii=False,
+    )
+
+
 def get_langchain_tools() -> list:
     """编排层入口：返回全部工具实例，直接传给 create_react_agent / StateGraph。"""
-    return [clone_repo_tool, repo_map_tool, risk_scan_tool, ingest_repo_tool]
+    return [clone_repo_tool, repo_map_tool, risk_scan_tool, ingest_repo_tool, github_search_tool]

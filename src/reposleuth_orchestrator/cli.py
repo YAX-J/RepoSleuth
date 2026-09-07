@@ -17,7 +17,8 @@ from dotenv import load_dotenv
 from reposleuth_report import save_report
 from reposleuth_toolkit import RepoTooLarge
 
-from .graph import build_graph
+from .graph import build_graph, build_scout_graph
+from .scout import DEFAULT_THRESHOLD
 from .state import CaseFile
 
 ZHIPU_OPENAI_BASE = "https://open.bigmodel.cn/api/paas/v4/"
@@ -65,6 +66,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="模型名（如 glm-4-flash / deepseek-chat / qwen-plus），默认读 REPOSLEUTH_MODEL")
     parser.add_argument("--provider", default="", help="模型 provider（默认按模型名推断）")
     parser.add_argument("--base-url", default="", help="OpenAI 兼容端点覆盖")
+    parser.add_argument("--search", action="store_true",
+                        help=" scouting 模式：把 repo_url 参数当作模糊需求，自动检索选仓")
+    parser.add_argument("--threshold", type=int, default=DEFAULT_THRESHOLD,
+                        help="置信度门控阈值（默认 7）")
     parser.add_argument("--cache-dir", default="repos_cache", help="克隆缓存目录")
     parser.add_argument("--out", default="reports", help="报告输出目录")
     args = parser.parse_args(argv)
@@ -79,10 +84,45 @@ def main(argv: list[str] | None = None) -> int:
         print(f"模型初始化失败：{exc}\n提示：安装对应 provider 包并配置 API Key 环境变量。", file=sys.stderr)
         return 2
 
-    print(f"[1/4] 克隆并分析仓库：{args.repo_url}")
+    requirement = args.repo_url
+    repo_url = args.repo_url
+
+    if args.search:
+        # ---------- scouting：模糊需求 → 检索选仓 ----------
+        print(f"[scout] 需求理解中：{requirement}")
+        scout_result = build_scout_graph(llm).invoke(CaseFile(requirement=requirement))
+        if not isinstance(scout_result, CaseFile):
+            scout_result = CaseFile.model_validate(scout_result)
+        if not scout_result.candidates or not scout_result.ranked:
+            print("未找到候选仓库，尝试换一组关键词。", file=sys.stderr)
+            return 1
+
+        top = scout_result.ranked[0]
+        if top.relevance >= args.threshold:
+            chosen = scout_result.candidates[top.index]
+            print(f"[scout] 置信度 {top.relevance}/10 ≥ 阈值 {args.threshold}，自动直选："
+                  f"{chosen.full_name}（{top.reason}）")
+            repo_url = chosen.html_url
+        else:
+            shortlist = scout_result.ranked[:3]
+            print("[scout] 置信度不足阈值，请确认候选：")
+            for i, r in enumerate(shortlist, 1):
+                c = scout_result.candidates[r.index]
+                print(f"  {i}. {c.full_name}  ★{c.stars}  [{r.relevance}/10] {r.reason}")
+                print(f"     {c.description[:80]}")
+            pick = input("选择编号（默认 1）：").strip() or "1"
+            try:
+                idx = shortlist[int(pick) - 1].index
+            except (ValueError, IndexError):
+                print("无效编号。", file=sys.stderr)
+                return 2
+            repo_url = scout_result.candidates[idx].html_url
+
+    # ---------- 侦探分析（直连/scouting 共用） ----------
+    print(f"[1/4] 克隆并分析仓库：{repo_url}")
     graph = build_graph(llm, cache_dir=Path(args.cache_dir))
     try:
-        result = graph.invoke(CaseFile(repo_url=args.repo_url))
+        result = graph.invoke(CaseFile(repo_url=repo_url, requirement=requirement if args.search else ""))
     except RepoTooLarge as exc:
         print(f"仓库超限：{exc}", file=sys.stderr)
         return 1

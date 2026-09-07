@@ -61,6 +61,17 @@ class RepoMap(BaseModel):
     stats: dict[str, int] = Field(default_factory=dict)
 
 
+class RepoCandidate(BaseModel):
+    """GitHub 搜索返回的候选仓库（scouting 阶段使用）。"""
+
+    full_name: str = Field(description="owner/repo")
+    html_url: str
+    description: str = ""
+    stars: int = 0
+    language: str = ""
+    size_kb: int = 0
+
+
 class Severity(str, Enum):
     critical = "critical"
     high = "high"

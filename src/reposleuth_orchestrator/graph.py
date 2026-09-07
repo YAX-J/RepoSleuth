@@ -9,8 +9,11 @@ from pathlib import Path
 
 from langgraph.graph import END, START, StateGraph
 
+from reposleuth_toolkit import search_repos
+
 from .agents import make_auditor, make_cartographer, make_chief, make_reader
 from .nodes import DEFAULT_CACHE_DIR, acquire_node, survey_node
+from .scout import make_query_agent, make_rank_agent, make_search_node
 from .state import CaseFile
 
 
@@ -39,4 +42,17 @@ def build_graph(llm, cache_dir: Path = DEFAULT_CACHE_DIR):
         g.add_edge(agent, "chief")
     g.add_edge("chief", END)
 
+    return g.compile()
+
+
+def build_scout_graph(llm, search_fn=search_repos):
+    """侦察图：需求理解 → 多路检索 → 重排。门控与用户确认在编排函数/CLI 层。"""
+    g = StateGraph(CaseFile)
+    g.add_node("plan", make_query_agent(llm))
+    g.add_node("search", make_search_node(search_fn))
+    g.add_node("rank", make_rank_agent(llm))
+    g.add_edge(START, "plan")
+    g.add_edge("plan", "search")
+    g.add_edge("search", "rank")
+    g.add_edge("rank", END)
     return g.compile()

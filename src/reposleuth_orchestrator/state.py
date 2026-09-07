@@ -10,7 +10,13 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
-from reposleuth_toolkit.models import IngestResult, RepoInfo, RepoMap, RiskReport
+from reposleuth_toolkit.models import (
+    IngestResult,
+    RepoCandidate,
+    RepoInfo,
+    RepoMap,
+    RiskReport,
+)
 
 
 class DetectiveVerdict(BaseModel):
@@ -33,11 +39,25 @@ class FinalReport(BaseModel):
     degraded: bool = Field(default=False, description="主笔 LLM 失败时降级生成，文字部分为确定性兜底")
 
 
+class RankedCandidate(BaseModel):
+    """重排后的候选仓库（relevance 由 LLM 打分，index 指向输入顺序）。"""
+
+    index: int = Field(ge=0, description="候选列表中的下标")
+    relevance: int = Field(ge=0, le=10, description="与需求的相关度")
+    reason: str = Field(default="", max_length=40, description="一句话理由")
+
+
 class CaseFile(BaseModel):
     """整条流水线的共享状态。"""
 
-    repo_url: str = Field(description="仓库 URL 或本地路径（直连模式）")
+    repo_url: str = Field(default="", description="仓库 URL 或本地路径（直连模式 / scouting 选定后回填）")
     requirement: str = Field(default="", description="用户模糊需求（scouting 分支启用）")
+
+    # --- scouting 产物 ---
+    queries: list[str] = Field(default_factory=list, description="需求理解生成的搜索词组")
+    candidates: list[RepoCandidate] = Field(default_factory=list, description="多路检索去重后的候选")
+    ranked: list[RankedCandidate] = Field(default_factory=list, description="重排打分结果")
+    selected_url: str = Field(default="", description="门控后确定的仓库 URL")
 
     # --- toolkit 确定性产物 ---
     repo: RepoInfo | None = None
