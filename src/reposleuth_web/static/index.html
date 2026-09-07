@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>RepoSleuth Cockpit — 代码侦探驾驶舱</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=Noto+Sans+SC:wght@400;500;700&display=swap" rel="stylesheet">
+<script type="module">
+  import mermaid from "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs";
+  mermaid.initialize({ startOnLoad: false, theme: "dark" });
+  window.__mermaid = mermaid;
+</script>
+<style>
+:root{
+  --primary:#6C63FF; --secondary:#3ECFCF; --accent:#FF6584;
+  --bg:#0D0D1A; --surface:#161628; --surface-2:#1E1E36;
+  --outline:rgba(255,255,255,.08); --outline-2:rgba(255,255,255,.14);
+  --text:#EDEDF7; --text-2:#A6A6C0; --text-3:#6E6E8C;
+  --ok:#9BE8B2; --font-d:'Space Grotesk','Noto Sans SC',sans-serif;
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:'Noto Sans SC',system-ui,sans-serif;line-height:1.6;min-height:100vh}
+body::before{content:"";position:fixed;inset:0;background:radial-gradient(640px 320px at 15% -5%,rgba(108,99,255,.14),transparent 60%),radial-gradient(520px 300px at 90% 10%,rgba(62,207,207,.07),transparent 60%);pointer-events:none}
+.wrap{max-width:980px;margin:0 auto;padding:0 22px;position:relative}
+header{display:flex;align-items:center;justify-content:space-between;padding:18px 0;border-bottom:1px solid var(--outline)}
+.logo{font-family:var(--font-d);font-weight:700;font-size:18px;display:flex;align-items:center;gap:9px}
+.logo .dot{width:9px;height:9px;border-radius:50%;background:var(--accent);box-shadow:0 0 12px var(--accent)}
+.badge{font-size:12px;color:var(--text-2);border:1px solid var(--outline-2);padding:4px 12px;border-radius:999px}
+.badge b{color:var(--secondary);font-weight:500}
+h1{font-family:var(--font-d);font-size:clamp(20px,3vw,26px);margin:34px 0 4px}
+.sub{color:var(--text-2);font-size:14px;margin-bottom:24px}
+
+.panel{background:var(--surface);border:1px solid var(--outline);border-radius:16px;padding:22px;margin-bottom:18px}
+.row{display:flex;gap:12px;flex-wrap:wrap}
+input[type=text],select{height:46px;border-radius:11px;border:1.5px solid var(--outline-2);background:var(--surface-2);color:var(--text);padding:0 16px;font-size:14px;font-family:inherit;transition:border-color .2s}
+input[type=text]{flex:1;min-width:260px}
+input:focus,select:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px rgba(108,99,255,.16)}
+button.btn{height:46px;padding:0 24px;border-radius:11px;border:none;background:var(--primary);color:#fff;font-size:14.5px;font-weight:600;cursor:pointer;font-family:inherit;transition:all .18s}
+button.btn:hover{filter:brightness(1.1);transform:translateY(-1px)}
+button.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}
+button.btn.ghost{background:transparent;border:1px solid var(--outline-2);color:var(--text)}
+label.th{display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text-2)}
+
+.console{margin-top:18px;border-radius:11px;background:#0A0A14;border:1px solid var(--outline);padding:14px 16px;font-family:Consolas,'Cascadia Code',monospace;font-size:12.5px;max-height:210px;overflow-y:auto;display:none}
+.console .ln{margin:2px 0;white-space:pre-wrap;color:var(--ok)}
+.console .dim{color:#5E5E7E}.console .hl{color:var(--secondary)}.console .warn{color:#FFC46B}.console .err{color:#FF8FA3}
+
+.stages{display:none;margin-top:18px;grid-template-columns:repeat(4,1fr);gap:10px}
+.stages.inv{grid-template-columns:repeat(6,1fr)}
+.stage{text-align:center;padding:12px 4px}
+.stage .ic{width:46px;height:46px;margin:0 auto 8px;border-radius:13px;background:var(--surface-2);border:1px solid var(--outline);display:flex;align-items:center;justify-content:center;font-size:20px;transition:all .3s}
+.stage .nm{font-size:11.5px;color:var(--text-3)}
+.stage.active .ic{background:rgba(108,99,255,.18);border-color:var(--primary);transform:scale(1.1);box-shadow:0 0 20px rgba(108,99,255,.35)}
+.stage.active .nm{color:var(--text)}
+.stage.done .ic{background:rgba(62,207,207,.14);border-color:var(--secondary)}
+.stage.done .nm{color:var(--text-2)}
+
+.cands{display:none;margin-top:18px;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}
+.cand{background:var(--surface-2);border:1px solid var(--outline);border-radius:12px;padding:16px;cursor:pointer;transition:all .18s}
+.cand:hover{border-color:var(--primary);transform:translateY(-2px)}
+.cand h4{font-family:var(--font-d);font-size:15px;display:flex;justify-content:space-between;gap:8px}
+.cand h4 .rel{color:var(--secondary);font-size:13px;flex-shrink:0}
+.cand p{font-size:12.5px;color:var(--text-2);margin-top:6px}
+.cand .meta{font-size:11.5px;color:var(--text-3);margin-top:8px}
+
+.verdicts{display:none;margin-top:18px;grid-template-columns:repeat(3,1fr);gap:12px}
+.vd{background:var(--surface-2);border:1px solid var(--outline);border-radius:12px;padding:16px;opacity:0;transform:translateY(10px);transition:all .4s}
+.vd.show{opacity:1;transform:none}
+.vd .hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.vd .hd b{font-size:13.5px}
+.vd .score{font-family:var(--font-d);font-weight:700;font-size:19px;color:var(--secondary)}
+.vd ul{margin:6px 0 0 16px;font-size:12.5px;color:var(--text-2)}
+.vd .note{font-size:12px;color:var(--text-3);margin-top:8px;border-top:1px dashed var(--outline);padding-top:8px}
+
+.report{display:none;margin-top:18px}
+.report.show{display:block;animation:up .45s cubic-bezier(.34,1.56,.64,1)}
+@keyframes up{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+.rp-head{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;margin-bottom:14px}
+.rp-head h2{font-family:var(--font-d);font-size:21px}
+.tag{font-size:11.5px;padding:3px 10px;border-radius:999px;border:1px solid var(--outline-2);color:var(--text-2)}
+.tag.warn{color:#FFC46B;border-color:rgba(255,196,107,.4)}
+.scorebars{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.sb{background:var(--surface-2);border:1px solid var(--outline);border-radius:11px;padding:13px 15px}
+.sb .t{display:flex;justify-content:space-between;font-size:12.5px;color:var(--text-2);margin-bottom:7px}
+.sb .t b{color:var(--text);font-family:var(--font-d)}
+.sb .bar{height:7px;border-radius:99px;background:rgba(255,255,255,.06);overflow:hidden}
+.sb .bar i{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--primary),var(--secondary));width:0;transition:width 1s cubic-bezier(.2,0,0,1)}
+.mermaid-box{border-radius:12px;background:#0A0A14;border:1px solid var(--outline);padding:16px;margin-bottom:16px;overflow-x:auto}
+.mermaid-box .mermaid{display:flex;justify-content:center}
+.rp-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:720px){.rp-grid,.verdicts,.scorebars{grid-template-columns:1fr}}
+.rp-card{background:var(--surface-2);border:1px solid var(--outline);border-radius:12px;padding:16px}
+.rp-card h4{font-size:13.5px;margin-bottom:10px;color:var(--secondary)}
+.rp-card ol,.rp-card ul{margin-left:18px;font-size:13px;color:var(--text-2)}
+.rp-card li{margin:5px 0}
+.stats-row{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:12.5px;color:var(--text-3)}
+.stats-row b{color:var(--text-2)}
+.actions{margin-top:14px;display:flex;gap:10px}
+.hidden{display:none!important}
+.banner{display:none;margin-top:14px;padding:12px 16px;border-radius:11px;background:rgba(255,101,132,.09);border:1px solid rgba(255,101,132,.35);color:#FF8FA3;font-size:13.5px}
+footer{margin-top:40px;padding:26px 0 40px;text-align:center;color:var(--text-3);font-size:12.5px;border-top:1px solid var(--outline)}
+footer a{color:var(--text-2)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="logo"><span class="dot"></span>RepoSleuth Cockpit</div>
+    <div class="badge">模型 <b id="modelBadge">加载中…</b> · 阈值 <b id="thBadge">7</b></div>
+  </header>
+
+  <h1>模糊需求 → 自动找仓库 → 三侦探出报告</h1>
+  <p class="sub">输入一句想找什么库，Agent 自主检索 GitHub、置信度门控、并行勘查并出具 mermaid 架构图 + 上手路线 + 风险清单。</p>
+
+  <!-- Phase 1: 侦察 -->
+  <div class="panel">
+    <div class="row">
+      <input type="text" id="req" value="一个好用的 Python CLI 框架" placeholder="例如：一个好用的 Python CLI 框架" spellcheck="false">
+      <label class="th">阈值
+        <select id="threshold">
+          <option value="6">6 宽松</option><option value="7" selected>7 标准</option><option value="8">8 严格</option>
+        </select>
+      </label>
+      <button class="btn" id="scoutBtn">🔍 开始侦察</button>
+    </div>
+    <div class="stages" id="scoutStages">
+      <div class="stage" data-k="plan"><div class="ic">🧭</div><div class="nm">需求解析</div></div>
+      <div class="stage" data-k="search"><div class="ic">🛰️</div><div class="nm">GitHub 检索</div></div>
+      <div class="stage" data-k="rank"><div class="ic">📊</div><div class="nm">候选重排</div></div>
+      <div class="stage" data-k="gate"><div class="ic">🎚️</div><div class="nm">置信度门控</div></div>
+    </div>
+    <div class="console" id="log"></div>
+    <div class="cands" id="cands"></div>
+    <div class="banner" id="banner"></div>
+  </div>
+
+  <!-- Phase 2: 勘查 -->
+  <div class="panel hidden" id="invPanel">
+    <div class="row" style="justify-content:space-between;align-items:center">
+      <div style="font-size:14px">勘查目标：<b id="invTarget" style="font-family:var(--font-d)"></b></div>
+      <div class="row" style="gap:8px"><span class="tag" id="invRepoMeta"></span></div>
+    </div>
+    <div class="stages inv" id="invStages">
+      <div class="stage" data-k="acquire"><div class="ic">📦</div><div class="nm">克隆取证</div></div>
+      <div class="stage" data-k="survey"><div class="ic">🗺️</div><div class="nm">静态测绘</div></div>
+      <div class="stage" data-k="cartographer"><div class="ic">🧑‍🎨</div><div class="nm">地图员</div></div>
+      <div class="stage" data-k="reader"><div class="ic">📖</div><div class="nm">深读员</div></div>
+      <div class="stage" data-k="auditor"><div class="ic">🛡️</div><div class="nm">评审员</div></div>
+      <div class="stage" data-k="chief"><div class="ic">🧑‍⚖️</div><div class="nm">首席结案</div></div>
+    </div>
+    <div class="verdicts" id="verdicts"></div>
+  </div>
+
+  <!-- Phase 3: 报告 -->
+  <div class="report" id="report">
+    <div class="rp-head">
+      <h2 id="rpName"></h2>
+      <span class="tag" id="rpDegraded" style="display:none">⚠ 降级报告（文字为确定性兜底）</span>
+    </div>
+    <div class="scorebars" id="scorebars"></div>
+    <div class="mermaid-box"><div class="mermaid" id="mermaidBox"></div></div>
+    <div class="rp-grid">
+      <div class="rp-card"><h4>🧭 新人上手路线</h4><ol id="rpOnboarding"></ol></div>
+      <div class="rp-card"><h4>🚨 风险清单</h4><ul id="rpRisks"></ul></div>
+    </div>
+    <div class="stats-row" id="rpStats"></div>
+    <div class="actions">
+      <button class="btn ghost" id="dlBtn">⬇ 下载 Markdown 报告</button>
+      <button class="btn ghost" id="resetBtn">↺ 再查一个</button>
+    </div>
+  </div>
+
+  <footer>Multi-agent codebase investigation · <a href="https://github.com/YAX-J/RepoSleuth" target="_blank" rel="noopener">github.com/YAX-J/RepoSleuth</a></footer>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const log=$("log");
+let markdown="",currentUrl="",scoutDone=false;
+
+function addLog(msg,cls=""){
+  log.style.display="block";
+  const d=document.createElement("div");d.className="ln "+cls;d.textContent=msg;
+  log.appendChild(d);log.scrollTop=log.scrollHeight;
+}
+function stage(list,key,state){
+  const el=document.querySelector('#'+list+' .stage[data-k="'+key+'"]');
+  if(!el)return;
+  el.classList.remove("active","done");if(state)el.classList.add(state);
+}
+function resetStages(list){document.querySelectorAll('#'+list+' .stage').forEach(s=>s.classList.remove("active","done"))}
+function banner(msg){const b=$("banner");if(!msg){b.style.display="none";return}b.style.display="block";b.textContent=msg}
+function setBusy(on){$("scoutBtn").disabled=on;$("scoutBtn").textContent=on?"勘查中…":"🔍 开始侦察"}
+
+/* SSE 读取：POST + fetch 流式解析 */
+async function sse(url,body,onEvent){
+  const resp=await fetch(url,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(!resp.ok||!resp.body){onEvent({type:"error",message:"HTTP "+resp.status});return}
+  const reader=resp.body.getReader(),dec=new TextDecoder();let buf="";
+  for(;;){
+    const{done,value}=await reader.read();if(done)break;
+    buf+=dec.decode(value,{stream:true});
+    let idx;
+    while((idx=buf.indexOf("\n\n"))>=0){
+      const frame=buf.slice(0,idx);buf=buf.slice(idx+2);
+      if(frame.startsWith("data: ")){
+        try{onEvent(JSON.parse(frame.slice(6)))}catch(e){/* 忽略坏帧 */}
+      }
+    }
+  }
+}
+
+/* ---------- 侦察 ---------- */
+$("scoutBtn").addEventListener("click",runScout);
+$("req").addEventListener("keydown",e=>{if(e.key==="Enter")runScout()});
+async function runScout(){
+  const requirement=$("req").value.trim();
+  if(!requirement){banner("先输入一句需求描述");return}
+  banner("");log.innerHTML="";$("cands").innerHTML="";$("cands").style.display="none";
+  $("report").classList.remove("show");$("invPanel").classList.add("hidden");
+  resetStages("scoutStages");setBusy(true);scoutDone=false;
+  addLog("[scout] 需求: "+requirement,"dim");
+  await sse("/api/scout",{requirement,threshold:+$("threshold").value},ev=>{
+    if(ev.type==="stage"){stage("scoutStages",ev.node,"active");addLog("[stage] "+ev.label,"dim")}
+    else if(ev.type==="queries"){stage("scoutStages","plan","done");addLog("[plan] 搜索词: "+ev.queries.join(" | "),"hl")}
+    else if(ev.type==="candidates"){stage("scoutStages","search","done");addLog("[search] 命中 "+ev.total+" 个候选仓库")}
+    else if(ev.type==="ranked"){stage("scoutStages","rank","done");
+      ev.items.slice(0,5).forEach(c=>addLog("  "+c.full_name+"  ★"+c.stars+"  ["+c.relevance+"/10] "+(c.reason||""),"dim"))}
+    else if(ev.type==="gate"){
+      stage("scoutStages","gate","done");stage("scoutStages","rank",null);
+      if(ev.mode==="auto"){
+        addLog("[gate] 置信度 "+ev.top_relevance+"/10 ≥ 阈值 "+ev.threshold+" → 自动选定 "+ev.full_name,"hl");
+        startInvestigate(ev.repo_url,ev.full_name);
+      }else if(ev.mode==="confirm"){
+        addLog("[gate] 置信度 "+ev.top_relevance+"/10 < 阈值 "+ev.threshold+" → 请人工确认候选","warn");
+        showCandidates(ev.shortlist);
+      }else{banner(ev.message||"未找到候选仓库");setBusy(false)}
+    }
+    else if(ev.type==="error"){banner(ev.message);addLog("[error] "+ev.message,"err");setBusy(false)}
+    else if(ev.type==="done"){if(!scoutDone)setBusy(false)}
+  });
+}
+function showCandidates(items){
+  const box=$("cands");box.style.display="grid";
+  box.innerHTML="";
+  items.forEach(c=>{
+    const el=document.createElement("div");el.className="cand";
+    el.innerHTML='<h4><span></span><span class="rel"></span></h4><p></p><div class="meta"></div>';
+    el.querySelector("h4 span").textContent=c.full_name;
+    el.querySelector(".rel").textContent="相关度 "+c.relevance+"/10";
+    el.querySelector("p").textContent=c.description||"";
+    el.querySelector(".meta").textContent="★ "+c.stars+" · "+(c.language||"-")+" · "+Math.round((c.size_kb||0)/1024)+"MB";
+    el.addEventListener("click",()=>startInvestigate(c.html_url,c.full_name));
+    box.appendChild(el);
+  });
+}
+
+/* ---------- 勘查 ---------- */
+function startInvestigate(repoUrl,fullName){
+  if(scoutDone)return;scoutDone=true;setBusy(false);
+  currentUrl=repoUrl;$("invTarget").textContent=fullName;
+  $("invPanel").classList.remove("hidden");
+  resetStages("invStages");$("verdicts").innerHTML="";$("verdicts").style.display="none";
+  $("report").classList.remove("show");banner("");
+  $("invPanel").scrollIntoView({behavior:"smooth",block:"start"});
+  addLog("[investigate] 开始勘查 "+fullName,"hl");
+  const seen={};
+  sse("/api/investigate",{repo_url:repoUrl},ev=>{
+    if(ev.type==="acquire"){stage("invStages","acquire","done");
+      $("invRepoMeta").textContent=ev.repo.file_count+" 文件 · "+ev.repo.total_size_mb+"MB";
+      addLog("[acquire] "+ev.repo.name+" ✓（"+ev.repo.file_count+" 文件，缓存复用见日志）")}
+    else if(ev.type==="survey"){stage("invStages","survey","done");
+      const s=ev.stats||{};addLog("[survey] 模块 "+(s.modules??"-")+" · 内部边 "+(s.internal_edges??"-")+" · 外部依赖 "+(s.external_deps??"-"));
+      const rs=ev.risk_summary||{};
+      addLog("[survey] 风险扫描("+ev.risk_engine+"): critical="+(rs.critical||0)+" high="+(rs.high||0)+" medium="+(rs.medium||0)+" low="+(rs.low||0),"dim");
+      ["cartographer","reader","auditor"].forEach(k=>stage("invStages",k,"active"));
+      $("verdicts").style.display="grid";}
+    else if(ev.type==="verdict"){
+      stage("invStages",ev.agent,"done");
+      if(!seen[ev.agent]){
+        seen[ev.agent]=1;
+        const names={cartographer:"🗺️ 地图员 · 架构",reader:"📖 深读员 · 可读性",auditor:"🛡️ 评审员 · 安全"};
+        const el=document.createElement("div");el.className="vd";
+        el.innerHTML='<div class="hd"><b></b><span class="score"></span></div><ul></ul><div class="note"></div>';
+        el.querySelector(".hd b").textContent=names[ev.agent]||ev.agent;
+        el.querySelector(".score").textContent=ev.score+"/10";
+        const ul=el.querySelector("ul");
+        (ev.findings||[]).slice(0,4).forEach(f=>{const li=document.createElement("li");li.textContent=f;ul.appendChild(li)});
+        el.querySelector(".note").textContent=ev.notes||"";
+        $("verdicts").appendChild(el);
+        requestAnimationFrame(()=>el.classList.add("show"));
+        addLog("["+ev.agent+"] "+ev.score+"/10 "+(ev.notes||""),"hl");
+      }
+    }
+    else if(ev.type==="report"){stage("invStages","chief","done");showReport(ev.report)}
+    else if(ev.type==="error"){banner(ev.message);addLog("[error] "+ev.message,"err")}
+  });
+}
+
+/* ---------- 报告 ---------- */
+async function showReport(rp){
+  $("rpName").textContent="📋 "+rp.repo_name+" 侦察报告";
+  $("rpDegraded").style.display=rp.degraded?"":"none";
+  const labels={cartographer:"架构",reader:"可读性",auditor:"安全"};
+  const box=$("scorebars");box.innerHTML="";
+  Object.entries(labels).forEach(([k,lb])=>{
+    const sc=(rp.scores||{})[k];
+    const el=document.createElement("div");el.className="sb";
+    el.innerHTML='<div class="t"><span></span><b></b></div><div class="bar"><i></i></div>';
+    el.querySelector(".t span").textContent=lb;
+    el.querySelector(".t b").textContent=sc?sc+"/10":"-";
+    box.appendChild(el);
+    if(sc)requestAnimationFrame(()=>requestAnimationFrame(()=>el.querySelector("i").style.width=(sc*10)+"%"));
+  });
+  $("mermaidBox").innerHTML="";
+  if(rp.mermaid&&window.__mermaid){
+    try{
+      const{svg}=await window.__mermaid.render("mmd-"+Date.now(),rp.mermaid);
+      $("mermaidBox").innerHTML=svg;
+    }catch(e){$("mermaidBox").textContent=rp.mermaid}
+  }else{$("mermaidBox").textContent=rp.mermaid||"（无架构图）"}
+  const ol=$("rpOnboarding");ol.innerHTML="";
+  (rp.onboarding||[]).forEach(s=>{const li=document.createElement("li");li.textContent=s;ol.appendChild(li)});
+  const ul=$("rpRisks");ul.innerHTML="";
+  (rp.risks&&rp.risks.length?rp.risks:["未发现风险"]).forEach(r=>{const li=document.createElement("li");li.textContent=r;ul.appendChild(li)});
+  const st=rp.stats||{},row=$("rpStats");
+  row.innerHTML="";
+  [["模块数",st.modules],["内部依赖边",st.internal_edges],["外部依赖",st.external_deps],["总行数",st.total_loc]]
+    .forEach(([lb,v])=>{const sp=document.createElement("span");sp.innerHTML=lb+" <b>"+(v??"-")+"</b>";row.appendChild(sp)});
+  markdown=rp.markdown||"";
+  $("report").classList.add("show");
+  $("report").scrollIntoView({behavior:"smooth",block:"start"});
+  addLog("[chief] 报告已出具 ✓","hl");
+}
+$("dlBtn").addEventListener("click",()=>{
+  const blob=new Blob([markdown],{type:"text/markdown;charset=utf-8"});
+  const a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="reposleuth_report.md";a.click();URL.revokeObjectURL(a.href);
+});
+$("resetBtn").addEventListener("click",()=>{
+  $("report").classList.remove("show");$("invPanel").classList.add("hidden");
+  log.innerHTML="";setBusy(false);window.scrollTo({top:0,behavior:"smooth"});
+});
+
+/* ---------- init ---------- */
+fetch("/api/config").then(r=>r.json()).then(c=>{
+  $("modelBadge").textContent=c.model||"未配置（.env 设 REPOSLEUTH_MODEL）";
+  $("thBadge").textContent=c.threshold;
+}).catch(()=>{$("modelBadge").textContent="后端未连接"});
+</script>
+</body>
+</html>
