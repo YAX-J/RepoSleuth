@@ -18,22 +18,47 @@ SCORE_LABELS = {
 }
 
 
-def mermaid_from_repo_map(repo_map: RepoMap, max_nodes: int = 10) -> str:
-    """从依赖图确定性生成 mermaid：取关联度最高的 N 个模块及其内部边。"""
+def mermaid_from_repo_map(repo_map: RepoMap, max_nodes: int = 10, max_edges: int = 15) -> str:
+    """从依赖图确定性生成 mermaid。
+
+    选点策略（v2）：按"两端度数之和"给边打分，贪心保留得分最高的边——
+    这样选出的节点天然成对连线，避免按度数选点导致节点孤立、图退化。
+    """
     degree: dict[str, int] = {}
     for e in repo_map.edges:
         degree[e.source] = degree.get(e.source, 0) + 1
         degree[e.target] = degree.get(e.target, 0) + 1
-    top = sorted(degree, key=lambda m: (-degree[m], m))[:max_nodes]
-    chosen = set(top)
-    ids = {m: f"m{i}" for i, m in enumerate(top)}
+
+    scored = sorted(
+        (e for e in repo_map.edges if e.source != e.target),
+        key=lambda e: (-(degree[e.source] + degree[e.target]), e.source, e.target),
+    )
+
+    chosen: set[str] = set()
+    kept_edges = []
+    for e in scored:
+        new = (e.source not in chosen) + (e.target not in chosen)
+        if len(chosen) + new > max_nodes:
+            continue
+        chosen.update((e.source, e.target))
+        kept_edges.append(e)
+        if len(chosen) >= max_nodes:
+            # 节点满员后，仍收录已选节点之间的其余高分边（不超过 max_edges）
+            for extra in scored:
+                if len(kept_edges) >= max_edges:
+                    break
+                if extra.source in chosen and extra.target in chosen and extra not in kept_edges:
+                    kept_edges.append(extra)
+            break
+
+    order = sorted(chosen, key=lambda m: (-degree[m], m))
+    ids = {m: f"m{i}" for i, m in enumerate(order)}
 
     lines = ["graph TD"]
-    for m in top:
+    for m in order:
         lines.append(f'{ids[m]}["{m}"]')
-    for e in repo_map.edges:
-        if e.source in chosen and e.target in chosen:
-            lines.append(f"{ids[e.source]} --> {ids[e.target]}")
+    for e in kept_edges:
+        lines.append(f"{ids[e.source]} --> {ids[e.target]}")
     return "\n".join(lines)
 
 

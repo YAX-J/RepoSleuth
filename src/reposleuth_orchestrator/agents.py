@@ -106,6 +106,19 @@ def make_auditor(llm):
     return node
 
 
+def _degraded_report(state: CaseFile) -> FinalReport:
+    """主笔 LLM 失败时的确定性兜底报告（AGENTS.md：校验失败走降级路径）。"""
+    risks = []
+    if state.risk_report is not None:
+        risks = [f"{f.path}: {f.message}" for f in state.risk_report.findings[:6]]
+    return FinalReport(
+        repo_name=state.repo.name if state.repo else "unknown",
+        onboarding=["克隆仓库并阅读 README", "按架构图从核心模块读起", "运行测试套件验证环境"],
+        risks=risks,
+        degraded=True,
+    )
+
+
 def make_chief(llm):
     template = _load_prompt("chief")
 
@@ -115,9 +128,12 @@ def make_chief(llm):
             for v in (state.verdict_cartographer, state.verdict_reader, state.verdict_auditor)
             if v is not None
         ]
-        prompt = template.replace("<<<VERDICTS>>>", json.dumps([v.model_dump() for v in verdicts], ensure_ascii=False))
-        prompt = prompt.replace("<<<EVIDENCE>>>", _evidence(state)[:6_000])
-        report = _structured(llm, prompt, FinalReport)
+        try:
+            prompt = template.replace("<<<VERDICTS>>>", json.dumps([v.model_dump() for v in verdicts], ensure_ascii=False))
+            prompt = prompt.replace("<<<EVIDENCE>>>", _evidence(state)[:6_000])
+            report = _structured(llm, prompt, FinalReport)
+        except RuntimeError:
+            report = _degraded_report(state)
         # 确定性优先：架构图由依赖图渲染（AGENTS.md §2.8），评分由编排层回填
         if state.repo_map is not None:
             from reposleuth_report import mermaid_from_repo_map

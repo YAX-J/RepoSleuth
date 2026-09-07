@@ -30,6 +30,7 @@ class FinalReport(BaseModel):
     onboarding: list[str] = Field(default_factory=list, description="新人上手路线，<=5 步")
     risks: list[str] = Field(default_factory=list, description="风险清单，<=6 条")
     scores: dict[str, int] = Field(default_factory=dict, description="各侦探评分，由编排层回填")
+    degraded: bool = Field(default=False, description="主笔 LLM 失败时降级生成，文字部分为确定性兜底")
 
 
 class CaseFile(BaseModel):

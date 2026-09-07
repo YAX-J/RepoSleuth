@@ -1,0 +1,18 @@
+{
+  "_comment": "golden repo 回归基线：模块数/内部边数/外部依赖数/总行数。数字变化必须能被代码变更解释。",
+  "generated_at": "2026-09-07",
+  "pallets/click": {
+    "modules": 90,
+    "internal_edges": 196,
+    "external_deps": 7,
+    "total_loc": 29121,
+    "verdict_scores": {"cartographer": 8, "reader": 8, "auditor": 8}
+  },
+  "httpie/cli": {
+    "modules": 132,
+    "internal_edges": 592,
+    "external_deps": 20,
+    "total_loc": 18988,
+    "verdict_scores": {"cartographer": 7, "reader": 7, "auditor": 7}
+  }
+}
