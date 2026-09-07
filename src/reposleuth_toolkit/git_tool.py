@@ -117,6 +117,12 @@ def clone_repo(
     if dest.exists() and any(dest.iterdir()):
         if reuse:
             file_count, total = _measure(dest)
+            # 复用分支同样要执行阈值检查，否则超限仓库会绕过预检
+            if file_count > max_files or total / 1024 / 1024 > max_size_mb:
+                raise RepoTooLarge(
+                    f"复用目录预检：{file_count} 个文件 / {total / 1024 / 1024:.1f}MB "
+                    f"超过阈值（{max_files} 个文件 / {max_size_mb}MB）"
+                )
             return RepoInfo(
                 name=name,
                 url=url,
