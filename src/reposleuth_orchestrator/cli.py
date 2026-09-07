@@ -45,6 +45,10 @@ def _build_llm(model: str, provider: str = "", base_url: str = ""):
         kwargs["base_url"] = base_url
     if model.startswith("glm") and os.environ.get("ZHIPUAI_API_KEY"):
         kwargs["api_key"] = os.environ["ZHIPUAI_API_KEY"]
+    if kwargs.get("model_provider") == "openai":
+        # 结构化 JSON 输出容易被默认 max_tokens 截断，且评审需要确定性
+        kwargs["max_tokens"] = 4096
+        kwargs["temperature"] = 0
     return init_chat_model(model, **kwargs)
 
 
@@ -78,13 +82,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[1/4] 克隆并分析仓库：{args.repo_url}")
     graph = build_graph(llm, cache_dir=Path(args.cache_dir))
     try:
-        final = graph.invoke(CaseFile(repo_url=args.repo_url))
+        result = graph.invoke(CaseFile(repo_url=args.repo_url))
     except RepoTooLarge as exc:
         print(f"仓库超限：{exc}", file=sys.stderr)
         return 1
+    final = result if isinstance(result, CaseFile) else CaseFile.model_validate(result)
 
     print("[2/4] 三侦探评审完成：", ", ".join(
-        f"{a}={s}" for a, s in (final["report"].scores or {}).items()
+        f"{a}={s}" for a, s in (final.report.scores or {}).items()
     ))
     print("[3/4] 渲染报告…")
     out_path = save_report(final, Path(args.out))

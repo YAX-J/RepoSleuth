@@ -51,7 +51,6 @@ def _scripted_llm():
     report = json.dumps(
         {
             "repo_name": "sample",
-            "mermaid": "graph TD; app_main --> app_utils; app_utils --> app_const",
             "onboarding": ["读 app/main.py", "跑测试"],
             "risks": ["settings.py 疑似硬编码凭据"],
             "scores": {},

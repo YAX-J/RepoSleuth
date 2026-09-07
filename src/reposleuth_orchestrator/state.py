@@ -26,9 +26,9 @@ class FinalReport(BaseModel):
     """主笔 Agent 汇总产物（报告三件套）。"""
 
     repo_name: str
-    mermaid: str = Field(description="mermaid graph TD 语法的架构图")
-    onboarding: list[str] = Field(default_factory=list, description="新人上手路线，<=7 步")
-    risks: list[str] = Field(default_factory=list, description="风险清单，<=10 条")
+    mermaid: str = Field(default="", description="mermaid 架构图，由编排层从依赖图确定性渲染，不由 LLM 编造")
+    onboarding: list[str] = Field(default_factory=list, description="新人上手路线，<=5 步")
+    risks: list[str] = Field(default_factory=list, description="风险清单，<=6 条")
     scores: dict[str, int] = Field(default_factory=dict, description="各侦探评分，由编排层回填")
 
 

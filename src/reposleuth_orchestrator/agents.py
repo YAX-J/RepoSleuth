@@ -51,15 +51,26 @@ def _extract_json(raw: str) -> str:
     return text[start : end + 1]
 
 
-def _structured(llm, prompt: str, model: type[BaseModel]):
-    """调用 LLM 并校验为 pydantic 模型；解析失败抛异常（编排层负责重试/降级）。"""
-    raw = llm.invoke(prompt)
-    content = raw.content if hasattr(raw, "content") else str(raw)
-    if isinstance(content, list):  # 多模态内容块
-        content = "".join(
-            p.get("text", "") if isinstance(p, dict) else str(p) for p in content
-        )
-    return model.model_validate(json.loads(_extract_json(content)))
+def _structured(llm, prompt: str, model: type[BaseModel], retries: int = 2):
+    """调用 LLM 并校验为 pydantic 模型。
+
+    解析/校验失败按 AGENTS.md 走重试路径：附加"只输出 JSON"的纠偏指令重试。
+    """
+    last_err: Exception | None = None
+    reminder = ""
+    for attempt in range(retries + 1):
+        try:
+            raw = llm.invoke(prompt + reminder)
+            content = raw.content if hasattr(raw, "content") else str(raw)
+            if isinstance(content, list):  # 多模态内容块
+                content = "".join(
+                    p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+                )
+            return model.model_validate(json.loads(_extract_json(content)))
+        except (ValueError, json.JSONDecodeError) as exc:
+            last_err = exc
+            reminder = "\n\n【重试】你上一次的输出不是合法 JSON（可能被截断）。请精简内容并只输出一个完整、以 { 开头、以 } 结尾的 JSON 对象。"
+    raise RuntimeError(f"结构化输出重试 {retries} 次后仍失败: {last_err}")
 
 
 def make_cartographer(llm):
@@ -104,10 +115,15 @@ def make_chief(llm):
             for v in (state.verdict_cartographer, state.verdict_reader, state.verdict_auditor)
             if v is not None
         ]
-        evidence = template.replace("<<<VERDICTS>>>", json.dumps([v.model_dump() for v in verdicts], ensure_ascii=False))
-        evidence = evidence.replace("<<<EVIDENCE>>>", _evidence(state))
-        report = _structured(llm, evidence, FinalReport)
-        report.scores = {v.agent: v.score for v in verdicts}  # 编排层回填，LLM 不得编造
+        prompt = template.replace("<<<VERDICTS>>>", json.dumps([v.model_dump() for v in verdicts], ensure_ascii=False))
+        prompt = prompt.replace("<<<EVIDENCE>>>", _evidence(state)[:6_000])
+        report = _structured(llm, prompt, FinalReport)
+        # 确定性优先：架构图由依赖图渲染（AGENTS.md §2.8），评分由编排层回填
+        if state.repo_map is not None:
+            from reposleuth_report import mermaid_from_repo_map
+
+            report.mermaid = mermaid_from_repo_map(state.repo_map)
+        report.scores = {v.agent: v.score for v in verdicts}
         return {"report": report}
 
     return node
