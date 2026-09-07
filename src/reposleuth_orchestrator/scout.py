@@ -45,14 +45,22 @@ def make_query_agent(llm):
     return node
 
 
-def make_search_node(search_fn=search_repos, per_query: int = 5):
-    """多路检索 + 去重合并（确定性）。search_fn 可注入以便测试。"""
+def make_search_node(search_fn=search_repos, per_query: int = 5, max_size_mb: float = 50):
+    """多路检索 + 去重合并 + 体积预过滤（确定性）。search_fn 可注入以便测试。
+
+    超过 max_size_mb 的候选直接剔除——否则门控选中的仓库会在克隆预检时被拒，
+    整条流水线空跑。
+    """
 
     def node(state: CaseFile) -> dict:
         merged: dict[str, RepoCandidate] = {}
         for query in state.queries:
             try:
                 for cand in search_fn(query, max_results=per_query):
+                    if cand.size_kb / 1024 > max_size_mb:
+                        print(f"[scout] 剔除超限仓库 {cand.full_name} "
+                              f"({cand.size_kb / 1024:.0f}MB > {max_size_mb}MB)", file=sys.stderr)
+                        continue
                     merged.setdefault(cand.full_name, cand)
             except Exception as exc:  # 单路失败不拖垮整体
                 print(f"[scout] 查询 {query!r} 失败: {exc}", file=sys.stderr)
