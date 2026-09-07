@@ -39,6 +39,12 @@ python -m reposleuth_orchestrator "找一个处理 PDF 的轻量 Python 库" --s
 # 5. Web 界面
 python -m reposleuth_web
 
+# 5b. Web Server（FastAPI + SSE 前端，浏览器直接调用 Agent）
+python -m reposleuth_web.server
+# 打开 http://127.0.0.1:8000 —— 输入模糊需求，
+# 实时观看 检索→门控→三侦探 各阶段事件流，最终渲染 mermaid 报告，
+# 置信度不足阈值时在页面上人工确认候选仓库。
+
 # 6. MCP Server（供 Claude / Cursor 等调用）
 python -m reposleuth_mcp
 ```
