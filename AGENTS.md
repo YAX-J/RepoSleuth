@@ -63,6 +63,7 @@
 4. fetch 协商被损坏对象卡住时：先把本地 main 指回完好的旧提交再 fetch
 5. 运行测试用 `PYTHONPATH=src` + 项目 `.venv`；`pip install -e .` 可能被中断，用依赖直装替代
 6. 关键文件修改后**读回验证**；Edit 工具偶发"报告成功实际未写入"
+7. **密钥一律放 `.env`**（已被 gitignore，模板见 `.env.example`），禁止把 Key 写进代码、测试或提交；CLI 启动时经 `load_dotenv` 自动加载
 
 ## 7. 协作节奏
 

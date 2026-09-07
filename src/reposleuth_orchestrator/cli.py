@@ -12,6 +12,8 @@ import os
 import sys
 from pathlib import Path
 
+from dotenv import load_dotenv
+
 from reposleuth_report import save_report
 from reposleuth_toolkit import RepoTooLarge
 
@@ -51,6 +53,9 @@ def main(argv: list[str] | None = None) -> int:
         prog="reposleuth",
         description="RepoSleuth：多智能体代码库分析（直连模式）",
     )
+    # .env 优先从工作目录加载，找不到则回退到项目根目录
+    load_dotenv()
+    load_dotenv(Path(__file__).resolve().parents[2] / ".env")
     parser.add_argument("repo_url", help="GitHub URL 或本地仓库路径")
     parser.add_argument("--model", default=os.environ.get("REPOSLEUTH_MODEL", ""),
                         help="模型名（如 glm-4-flash / deepseek-chat / qwen-plus），默认读 REPOSLEUTH_MODEL")
