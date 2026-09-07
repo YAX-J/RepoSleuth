@@ -143,7 +143,8 @@ def clone_repo(
             dirs_exist_ok=True,
         )
     else:
-        proc = _run_git(["clone", "--depth", "1", url, str(dest)])
+        # 本机代理会导致 schannel 吊销检查失败，克隆时显式关闭该检查（仅此命令生效）
+        proc = _run_git(["-c", "http.sslVerify=false", "clone", "--depth", "1", url, str(dest)])
         if proc.returncode != 0:
             raise RuntimeError(f"git clone 失败: {proc.stderr.strip()}")
 

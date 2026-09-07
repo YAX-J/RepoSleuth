@@ -18,12 +18,32 @@ from reposleuth_toolkit import RepoTooLarge
 from .graph import build_graph
 from .state import CaseFile
 
+ZHIPU_OPENAI_BASE = "https://open.bigmodel.cn/api/paas/v4/"
 
-def _build_llm(model: str):
-    """懒加载真实模型（仅 CLI 入口触发，保持库导入零 LLM 依赖）。"""
+
+def _build_llm(model: str, provider: str = "", base_url: str = ""):
+    """懒加载真实模型（仅 CLI 入口触发，保持库导入零 LLM 依赖）。
+
+    - provider/base_url：--provider / --base-url 或环境变量 REPOSLEUTH_PROVIDER / REPOSLEUTH_BASE_URL；
+    - glm 系列自动路由到智谱 OpenAI 兼容端点（凭据读 ZHIPUAI_API_KEY）；
+    - 其余模型交给 init_chat_model 自行推断。
+    """
     from langchain.chat_models import init_chat_model
 
-    return init_chat_model(model)
+    provider = provider or os.environ.get("REPOSLEUTH_PROVIDER", "")
+    base_url = base_url or os.environ.get("REPOSLEUTH_BASE_URL", "")
+
+    kwargs: dict = {}
+    if not provider and model.startswith("glm"):
+        provider = "openai"
+        base_url = base_url or ZHIPU_OPENAI_BASE
+    if provider:
+        kwargs["model_provider"] = provider
+    if base_url:
+        kwargs["base_url"] = base_url
+    if model.startswith("glm") and os.environ.get("ZHIPUAI_API_KEY"):
+        kwargs["api_key"] = os.environ["ZHIPUAI_API_KEY"]
+    return init_chat_model(model, **kwargs)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -33,7 +53,9 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("repo_url", help="GitHub URL 或本地仓库路径")
     parser.add_argument("--model", default=os.environ.get("REPOSLEUTH_MODEL", ""),
-                        help="模型名（如 deepseek-chat / qwen-max），默认读 REPOSLEUTH_MODEL")
+                        help="模型名（如 glm-4-flash / deepseek-chat / qwen-plus），默认读 REPOSLEUTH_MODEL")
+    parser.add_argument("--provider", default="", help="模型 provider（默认按模型名推断）")
+    parser.add_argument("--base-url", default="", help="OpenAI 兼容端点覆盖")
     parser.add_argument("--cache-dir", default="repos_cache", help="克隆缓存目录")
     parser.add_argument("--out", default="reports", help="报告输出目录")
     args = parser.parse_args(argv)
@@ -43,7 +65,7 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     try:
-        llm = _build_llm(args.model)
+        llm = _build_llm(args.model, provider=args.provider, base_url=args.base_url)
     except Exception as exc:  # provider 包缺失 / key 未配置
         print(f"模型初始化失败：{exc}\n提示：安装对应 provider 包并配置 API Key 环境变量。", file=sys.stderr)
         return 2
