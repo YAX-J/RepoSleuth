@@ -18,20 +18,21 @@ import json
 
 from mcp.server.mcpserver import MCPServer
 
-from reposleuth_toolkit import deps_tool, git_tool, github_search, ingest_tool, risk_tool
+from reposleuth_toolkit import deps_tool, git_tool, ingest_tool, risk_tool
+from reposleuth_toolkit import github_search as github_search_toolkit
 
 mcp = MCPServer("reposleuth")
 
 
 @mcp.tool()
 def github_search(query: str, max_results: int = 8) -> str:
-    """Search GitHub repositories by keyword (rate-limit aware). Returns a JSON array of candidates."""
+    """按关键词搜索 GitHub 仓库；返回候选 JSON，限流或网络失败返回错误对象。"""
     try:
         return json.dumps(
-            [c.model_dump() for c in github_search.search_repos(query, max_results=max_results)],
+            [c.model_dump() for c in github_search_toolkit.search_repos(query, max_results=max_results)],
             ensure_ascii=False,
         )
-    except github_search.GitHubSearchError as exc:
+    except github_search_toolkit.GitHubSearchError as exc:
         return json.dumps({"error": str(exc)})
 
 
