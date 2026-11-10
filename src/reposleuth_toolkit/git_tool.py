@@ -8,12 +8,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
 import time
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -34,14 +36,22 @@ class RepoTooLarge(Exception):
     """仓库体积/文件数超过预检阈值。"""
 
 
-def _run_git(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(
-        ["git", *args],
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
-    )
+class RepoCloneError(RuntimeError):
+    """获取仓库失败，包括 git 子进程超时。"""
+
+
+def _run_git(args: list[str]) -> subprocess.CompletedProcess[str]:
+    try:
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=120,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise RepoCloneError("git 操作超过 120 秒，已终止") from exc
 
 
 def _github_size_mb(url: str) -> float | None:
@@ -63,6 +73,22 @@ def _github_size_mb(url: str) -> float | None:
 def _repo_name(url: str) -> str:
     tail = url.rstrip("/").split("/")[-1]
     return tail.removesuffix(".git")
+
+
+def _source_hash(url: str, local_dir: Path | None) -> str:
+    """按来源计算缓存指纹；本地路径规范化，GitHub 支持 HTTPS/SSH 等价地址。"""
+    if local_dir is not None:
+        identity = os.path.normcase(str(local_dir.resolve()))
+    else:
+        parsed = urllib.parse.urlsplit(url)
+        github_match = re.fullmatch(r"git@github\.com:([\w.-]+/[\w.-]+?)(?:\.git)?/?", url)
+        if parsed.hostname == "github.com" and parsed.scheme in {"https", "http", "ssh"}:
+            identity = "github.com/" + parsed.path.strip("/").removesuffix(".git").casefold()
+        elif github_match:
+            identity = "github.com/" + github_match.group(1).casefold()
+        else:
+            identity = url.rstrip("/").removesuffix(".git")
+    return hashlib.sha256(identity.encode("utf-8")).hexdigest()
 
 
 def _walk_files(root: Path):
@@ -102,20 +128,39 @@ def clone_repo(
     max_files: int = 2000,
     reuse: bool = True,
 ) -> RepoInfo:
-    """克隆仓库到 dest_parent/name，返回 RepoInfo。
+    """获取仓库副本并返回 RepoInfo；默认缓存目录按来源隔离。
 
     - GitHub URL：克隆前用 API 预检体积；
     - 本地 git 仓库：直接 git clone；
     - 本地普通目录（测试/离线）：copytree 回退，跳过 SKIP_DIRS；
-    - reuse=True 时目标目录已存在则直接复用；
+    - 默认缓存目录附加来源指纹；显式 name 保持指定目录名；
+    - reuse=True 仅复用来源指纹一致的缓存，旧的未验证缓存拒绝复用；
     - 克隆后再次测量，超限则删除目录并抛 RepoTooLarge。
     """
-    dest_parent = Path(dest_parent)
-    name = name or _repo_name(url)
-    dest = dest_parent / name
+    dest_parent = Path(dest_parent).resolve()
+    src = _as_local_dir(url)
+    name_provided = name is not None
+    name = name if name_provided else (src.name if src is not None else _repo_name(url))
+    if not name or name in {".", ".."} or "/" in name or "\\" in name or Path(name).is_absolute():
+        raise ValueError("仓库缓存名称必须是单个目录名")
+    source_hash = _source_hash(url, src)
+    cache_name = name if name_provided else f"{name}-{source_hash[:12]}"
+    dest = dest_parent / cache_name
+    if dest.resolve() != dest or dest.resolve().parent != dest_parent:
+        raise ValueError("仓库缓存目录不能指向目标父目录之外或使用符号链接")
+    if src is not None and not (src / ".git").exists() and dest.is_relative_to(src.resolve()):
+        raise ValueError("普通本地目录的缓存必须放在源目录之外，避免递归复制")
+    # 指纹旁文件不进入仓库分析范围，也不保存 URL 中可能包含的凭据。
+    origin_file = dest_parent / f".{cache_name}.reposleuth-origin"
 
     if dest.exists() and any(dest.iterdir()):
         if reuse:
+            try:
+                verified = origin_file.read_text(encoding="utf-8").strip() == source_hash
+            except (OSError, UnicodeError):
+                verified = False
+            if not verified:
+                raise FileExistsError(f"缓存来源不匹配或无法验证，请使用其他缓存目录：{dest}")
             file_count, total = _measure(dest)
             # 复用分支同样要执行阈值检查，否则超限仓库会绕过预检
             if file_count > max_files or total / 1024 / 1024 > max_size_mb:
@@ -140,7 +185,6 @@ def clone_repo(
         )
 
     dest_parent.mkdir(parents=True, exist_ok=True)
-    src = _as_local_dir(url)
     if src is not None and not (src / ".git").exists():
         # 本地普通目录：直接复制，语义等价于"获取仓库副本"
         shutil.copytree(
@@ -152,7 +196,7 @@ def clone_repo(
         # 本机代理会导致 schannel 吊销检查失败，克隆时显式关闭该检查（仅此命令生效）
         proc = _run_git(["-c", "http.sslVerify=false", "clone", "--depth", "1", url, str(dest)])
         if proc.returncode != 0:
-            raise RuntimeError(f"git clone 失败: {proc.stderr.strip()}")
+            raise RepoCloneError(f"git clone 失败: {proc.stderr.strip()}")
 
     file_count, total = _measure(dest)
     total_mb = total / 1024 / 1024
@@ -163,6 +207,7 @@ def clone_repo(
             f"超过阈值（{max_files} 个文件 / {max_size_mb}MB）"
         )
 
+    origin_file.write_text(source_hash + "\n", encoding="utf-8")
     return RepoInfo(
         name=name,
         url=url,
