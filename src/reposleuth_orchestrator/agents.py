@@ -25,8 +25,10 @@ def _load_prompt(name: str) -> str:
     return (PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
 
 
-def _evidence(state: CaseFile) -> str:
-    """把 toolkit 确定性产物拼装成证据包（确定性逻辑，预算内截断）。"""
+def _evidence(state: CaseFile, char_budget: int = EVIDENCE_CHAR_BUDGET) -> str:
+    """将证据各节共同限制在字符预算内，短节余量优先留给仓库文本。"""
+    if char_budget < 0:
+        raise ValueError("证据预算不能为负数")
     parts: list[str] = []
     if state.repo_map is not None:
         parts.append("## 依赖图（模块节点 + 导入边）\n" + state.repo_map.model_dump_json())
@@ -34,8 +36,26 @@ def _evidence(state: CaseFile) -> str:
         parts.append("## 风险扫描结果\n" + state.risk_report.model_dump_json())
     if state.ingest is not None:
         text = state.ingest.tree_text + "\n" + state.ingest.content_text
-        parts.append("## 仓库文本（预算内）\n" + text[:EVIDENCE_CHAR_BUDGET])
-    return "\n\n".join(parts)
+        parts.append("## 仓库文本（预算内）\n" + text)
+    if not parts:
+        return ""
+    # 为每类证据保留份额，避免较大的依赖图挤掉风险与代码；总预算包含分隔符。
+    available = max(0, char_budget - 2 * (len(parts) - 1))
+    share = available // len(parts)
+    allocations = [min(len(part), share) for part in parts]
+    spare = available - sum(allocations)
+    for i in reversed(range(len(parts))):
+        extra = min(spare, len(parts[i]) - allocations[i])
+        allocations[i] += extra
+        spare -= extra
+    marker = "\n...[证据过长已截断]"
+    bounded = []
+    for part, limit in zip(parts, allocations):
+        if len(part) > limit:
+            suffix = marker[:limit]
+            part = part[:limit - len(suffix)] + suffix
+        bounded.append(part)
+    return "\n\n".join(bounded)[:char_budget]
 
 
 def _extract_json(raw: str) -> str:
@@ -130,7 +150,7 @@ def make_chief(llm):
         ]
         try:
             prompt = template.replace("<<<VERDICTS>>>", json.dumps([v.model_dump() for v in verdicts], ensure_ascii=False))
-            prompt = prompt.replace("<<<EVIDENCE>>>", _evidence(state)[:6_000])
+            prompt = prompt.replace("<<<EVIDENCE>>>", _evidence(state, char_budget=6_000))
             report = _structured(llm, prompt, FinalReport)
         except RuntimeError:
             report = _degraded_report(state)
