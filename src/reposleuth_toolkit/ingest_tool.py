@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 
 from .models import IngestResult
+from .text_safety import redact_sensitive_text
 
 SKIP_DIRS = {
     ".git", ".venv", "venv", "node_modules", "__pycache__",
@@ -22,7 +23,7 @@ TEXT_EXTS = {
     ".c", ".h", ".cpp", ".cs", ".md", ".txt", ".toml", ".yaml", ".yml",
     ".cfg", ".ini", ".sql", ".sh", ".bat",
 }
-TEXT_FILES = {".env", "dockerfile", "makefile"}
+TEXT_FILES = {"dockerfile", "makefile"}
 
 
 def _build_tree(root: Path, max_entries: int = 400) -> str:
@@ -58,6 +59,8 @@ def _iter_text_files(root: Path):
         dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
         for name in sorted(filenames):
             p = Path(dirpath) / name
+            if name.lower() == ".env" or name.lower().startswith(".env."):
+                continue
             if p.suffix.lower() in TEXT_EXTS or name.lower() in TEXT_FILES:
                 yield p
 
@@ -69,11 +72,14 @@ def ingest_repo(
 ) -> IngestResult:
     """目录树 + 代码内容拼装，总字符不超过 max_total_chars。
 
+    - 排除 .env 及其变体，常见凭据赋值与私钥先脱敏，再截断；
     - 单文件超过 max_file_chars 先截断（保留开头，通常含 imports/签名）；
     - 预算耗尽后剩余文件记入 truncated_files，供 Agent 决定是否精读。
     """
+    if max_total_chars < 0 or max_file_chars < 0:
+        raise ValueError("字符预算不能为负数")
     root = Path(repo_path).resolve()
-    tree_text = _build_tree(root)
+    tree_text = _build_tree(root)[:max_total_chars]
 
     parts: list[str] = []
     truncated: list[str] = []
@@ -88,6 +94,7 @@ def ingest_repo(
             text = path.read_text(encoding="utf-8", errors="replace")
         except OSError:
             continue
+        text = redact_sensitive_text(text)
         if len(text) > max_file_chars:
             text = text[:max_file_chars] + "\n...[文件过长已截断]"
         header = f"\n### {rel}\n"
