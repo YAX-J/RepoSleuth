@@ -73,7 +73,7 @@ def _candidate_view(c: Any) -> dict:
     }
 
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def index() -> FileResponse:
     return FileResponse(_STATIC_DIR / "index.html")
 
