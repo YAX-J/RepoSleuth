@@ -35,6 +35,9 @@ def _module_path(root: Path, file: Path) -> str | None:
     """文件路径 -> 点分模块路径；__init__.py 归一为包路径；非法目录名返回 None。"""
     rel = file.relative_to(root)
     parts = list(rel.with_suffix("").parts)
+    # src 布局中的 src 是源码根目录；有 __init__.py 时仍视为真实包。
+    if rel.parts[0] == "src" and not (root / "src" / "__init__.py").exists():
+        parts = parts[1:]
     if parts and parts[-1] == "__init__":
         parts = parts[:-1]
     if not parts:
@@ -53,6 +56,9 @@ def _resolve_import(
     level: int,
     cur_module: str,
     module_set: set[str],
+    *,
+    is_package: bool = False,
+    from_module: str | None = None,
 ) -> tuple[str, str | None]:
     """解析一条 import。
 
@@ -60,26 +66,34 @@ def _resolve_import(
     - ("internal", 模块路径)：内部导入边；
     - ("external", 顶层包名)：第三方依赖；
     - ("stdlib", None)：标准库，忽略。
+    - ("unresolved", None)：无法定位的相对导入，不生成虚构节点。
     """
-    if level == 0:
-        top = name.split(".")[0]
-        if top in sys.stdlib_module_names:
-            return "stdlib", None
-        parts = name.split(".")
-        for i in range(len(parts), 0, -1):
-            cand = ".".join(parts[:i])
-            if cand in module_set:
-                return "internal", cand
-        return "external", top
+    if level:
+        # __init__.py 的模块路径已经是包名，不能再删去最后一级。
+        pkg_parts = cur_module.split(".") if is_package else cur_module.split(".")[:-1]
+        up = level - 1
+        if up >= len(pkg_parts):
+            return "unresolved", None
+        if up:
+            pkg_parts = pkg_parts[:-up]
+        if from_module:
+            base = ".".join([*pkg_parts, from_module])
+            if base not in module_set and not any(m.startswith(base + ".") for m in module_set):
+                return "unresolved", None
+        name = ".".join([*pkg_parts, name]) if name else ".".join(pkg_parts)
 
-    # 相对导入：level=1 是当前包，每多一级向上走一层
-    pkg_parts = cur_module.split(".")[:-1]
-    up = level - 1
-    if up:
-        pkg_parts = pkg_parts[:-up] if len(pkg_parts) >= up else []
-    base_parts = pkg_parts + ([name] if name else [])
-    base = ".".join(base_parts)
-    return ("internal", base) if base else ("stdlib", None)
+    # from pkg.module import symbol 应指向存在的 module，而不是虚构 symbol 节点。
+    parts = name.split(".")
+    for i in range(len(parts), 0, -1):
+        candidate = ".".join(parts[:i])
+        if candidate in module_set:
+            return "internal", candidate
+    if level:
+        return "unresolved", None
+    top = parts[0]
+    if top in sys.stdlib_module_names:
+        return "stdlib", None
+    return "external", top
 
 
 def analyze_repo_map(repo_path: str | Path, repo_name: str | None = None) -> RepoMap:
@@ -115,24 +129,26 @@ def analyze_repo_map(repo_path: str | Path, repo_name: str | None = None) -> Rep
         except SyntaxError:
             continue
 
-        candidates: list[tuple[str, int]] = []
+        candidates: list[tuple[str, int, str | None]] = []
         for node in ast.walk(tree):
             if isinstance(node, ast.Import):
-                candidates.extend((alias.name, 0) for alias in node.names)
+                candidates.extend((alias.name, 0, None) for alias in node.names)
             elif isinstance(node, ast.ImportFrom):
                 base = node.module or ""
                 for alias in node.names:
                     if alias.name == "*":
-                        if base:
-                            candidates.append((base, node.level or 0))
+                        candidates.append((base, node.level or 0, base))
                     else:
                         full = f"{base}.{alias.name}" if base else alias.name
-                        candidates.append((full, node.level or 0))
+                        candidates.append((full, node.level or 0, base))
 
-        for name, level in candidates:
-            if not name:
+        for name, level, from_module in candidates:
+            if not name and not level:
                 continue
-            kind, target = _resolve_import(name, level, mp, module_set)
+            kind, target = _resolve_import(
+                name, level, mp, module_set,
+                is_package=f.name == "__init__.py", from_module=from_module,
+            )
             if kind == "internal" and target and target != mp:
                 edges[(mp, target)] = CallEdge(source=mp, target=target)
             elif kind == "external" and target:
