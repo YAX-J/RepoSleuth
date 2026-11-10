@@ -35,18 +35,17 @@ m0 --> m9
 
 1. 阅读README
 2. 浏览src.click.core.py
-3. 查看src.click.utils.py
+3. 查看tests目录
 4. 运行测试用例
 5. 探索examples目录
 
 ## 风险清单
 
-- [ ] src.click.core.py: 命令解析逻辑复杂
-- [ ] src.click.core.py: 依赖外部库
-- [ ] src.click.core.py: 数据泄露风险
-- [ ] src.click.core.py: 安全漏洞
-- [ ] src.click.core.py: 代码风格统一
-- [ ] src.click.core.py: 依赖管理规范
+- [ ] src.click.core.py: 命令解析逻辑复杂，需关注潜在安全漏洞
+- [ ] src.click.core.py: 依赖外部库，需关注数据泄露风险
+- [ ] src.click.core.py: 代码风格统一，工程质量良好
+- [ ] src.click.core.py: 文档完善，易于理解
+- [ ] src.click.core.py: 依赖管理规范，无潜在风险
 
 ## 附录 · 仓库画像
 
