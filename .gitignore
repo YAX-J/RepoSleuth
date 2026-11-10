@@ -9,3 +9,5 @@ build/
 *.egg-info/
 reports/.pytest_cache/
 repos_cache/
+.workbuddy/
+reports/
