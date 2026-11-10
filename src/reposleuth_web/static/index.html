@@ -286,7 +286,7 @@ function startInvestigate(repoUrl,fullName){
         el.querySelector(".hd b").textContent=names[ev.agent]||ev.agent;
         el.querySelector(".score").textContent=ev.score+"/10";
         const ul=el.querySelector("ul");
-        (ev.findings||[]).slice(0,4).forEach(f=>{const li=document.createElement("li");li.textContent=f;ul.appendChild(li)});
+        (ev.findings||[]).slice(0,4).forEach((f,i)=>{const li=document.createElement("li");li.textContent=f;appendEvidence(li,(ev.evidence||[]).find(e=>e.claim_index===i));ul.appendChild(li)});
         el.querySelector(".note").textContent=ev.notes||"";
         $("verdicts").appendChild(el);
         requestAnimationFrame(()=>el.classList.add("show"));
@@ -299,6 +299,28 @@ function startInvestigate(repoUrl,fullName){
 }
 
 /* ---------- 报告 ---------- */
+function appendEvidence(parent,evidence){
+  const note=document.createElement("small");note.style.display="block";
+  const basis=({rule:"规则发现",model:"模型推断",fallback:"兜底建议"})[evidence&&evidence.basis]||"模型推断";
+  const sources=evidence&&evidence.sources||[];
+  if(!evidence||evidence.status!=="verified"||!sources.length){
+    note.textContent=basis+" · "+(evidence&&evidence.reason||"未提供引用");parent.appendChild(note);return;
+  }
+  note.textContent=basis+" · 引用位置已校验";parent.appendChild(note);
+  sources.forEach(source=>{
+    const details=document.createElement("details"),summary=document.createElement("summary"),pre=document.createElement("pre");
+    summary.textContent=source.path+":"+source.start_line+"-"+source.end_line;
+    pre.textContent=source.snippet;pre.style.whiteSpace="pre-wrap";
+    details.append(summary,pre);
+    if(source.url){
+      try{const target=new URL(source.url);if(target.protocol==="https:"&&target.host==="github.com"){
+        const a=document.createElement("a");a.href=target.href;a.target="_blank";a.rel="noopener noreferrer";
+        a.textContent="查看该提交的源码";details.appendChild(a);
+      }}catch(error){note.textContent+=" · 源码链接不可用"}
+    }
+    parent.appendChild(details);
+  });
+}
 async function showReport(rp){
   $("rpName").textContent="📋 "+rp.repo_name+" 侦察报告";
   $("rpDegraded").style.display=rp.degraded?"":"none";
@@ -321,9 +343,9 @@ async function showReport(rp){
     }catch(e){$("mermaidBox").textContent=rp.mermaid}
   }else{$("mermaidBox").textContent=rp.mermaid||"（无架构图）"}
   const ol=$("rpOnboarding");ol.innerHTML="";
-  (rp.onboarding||[]).forEach(s=>{const li=document.createElement("li");li.textContent=s;ol.appendChild(li)});
+  (rp.onboarding||[]).forEach((s,i)=>{const li=document.createElement("li");li.textContent=s;appendEvidence(li,(rp.onboarding_evidence||[]).find(e=>e.claim_index===i));ol.appendChild(li)});
   const ul=$("rpRisks");ul.innerHTML="";
-  (rp.risks&&rp.risks.length?rp.risks:["未发现风险"]).forEach(r=>{const li=document.createElement("li");li.textContent=r;ul.appendChild(li)});
+  (rp.risks&&rp.risks.length?rp.risks:["未发现风险"]).forEach((r,i)=>{const li=document.createElement("li");li.textContent=r;if(rp.risks&&rp.risks.length)appendEvidence(li,(rp.risk_evidence||[]).find(e=>e.claim_index===i));ul.appendChild(li)});
   const st=rp.stats||{},row=$("rpStats");
   row.innerHTML="";
   [["模块数",st.modules],["内部依赖边",st.internal_edges],["外部依赖",st.external_deps],["总行数",st.total_loc]]

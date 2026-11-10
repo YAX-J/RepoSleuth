@@ -35,9 +35,12 @@ _PRIVATE_KEY = re.compile(
 
 def redact_sensitive_text(text: str) -> str:
     """遮蔽常见敏感字段的字面值与私钥块，保留字段名以供风险解释。"""
-    text = _PRIVATE_KEY.sub("[REDACTED PRIVATE KEY]", text)
+    def keep_lines(original: str, replacement: str) -> str:
+        return replacement + "\n" * (original.count("\n") - replacement.count("\n"))
+
+    text = _PRIVATE_KEY.sub(lambda m: keep_lines(m[0], "[REDACTED PRIVATE KEY]"), text)
     text = _TRIPLE_QUOTED_SECRET.sub(
-        lambda m: f"{m['prefix']}{m['quote'][0]}[REDACTED]{m['quote'][0]}", text,
+        lambda m: keep_lines(m[0], f"{m['prefix']}{m['quote'][0]}[REDACTED]{m['quote'][0]}"), text,
     )
     text = _QUOTED_SECRET.sub(
         lambda m: f"{m['prefix']}{m['quote']}[REDACTED]{m['quote']}", text,

@@ -120,6 +120,18 @@ def _as_local_dir(url: str) -> Path | None:
     return p if p.is_absolute() and p.is_dir() else None
 
 
+def _repo_revision(path: Path) -> str:
+    """记录实际获取副本的 Git 提交；普通目录没有提交版本。"""
+    if not (path / ".git").exists():
+        return ""
+    status = _run_git(["-C", str(path), "status", "--porcelain", "--untracked-files=all", "--ignored=matching"])
+    if status.returncode != 0 or status.stdout.strip():
+        return ""
+    proc = _run_git(["-C", str(path), "rev-parse", "HEAD"])
+    revision = proc.stdout.strip()
+    return revision if proc.returncode == 0 and re.fullmatch(r"[0-9a-f]{40,64}", revision) else ""
+
+
 def clone_repo(
     url: str,
     dest_parent: str | Path,
@@ -175,6 +187,7 @@ def clone_repo(
                 language=detect_language(dest),
                 file_count=file_count,
                 total_size_bytes=total,
+                commit_sha=_repo_revision(dest),
             )
         raise FileExistsError(f"目标目录已存在：{dest}")
 
@@ -216,4 +229,5 @@ def clone_repo(
         file_count=file_count,
         total_size_bytes=total,
         cloned_at=time.strftime("%Y-%m-%dT%H:%M:%S"),
+        commit_sha=_repo_revision(dest),
     )

@@ -15,6 +15,9 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from reposleuth_toolkit.evidence_tool import resolve_citations
+from reposleuth_toolkit.models import CitationRequest, EvidencePacket, SourceExcerpt
+
 from .state import CaseFile, DetectiveVerdict, FinalReport
 
 PROMPT_DIR = Path(__file__).parent / "prompts"
@@ -25,8 +28,12 @@ def _load_prompt(name: str) -> str:
     return (PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8")
 
 
-def _evidence(state: CaseFile, char_budget: int = EVIDENCE_CHAR_BUDGET) -> str:
-    """将证据各节共同限制在字符预算内，短节余量优先留给仓库文本。"""
+def _source_block(source: SourceExcerpt) -> str:
+    return f"\n[{source.id}] {source.path}:{source.start_line}-{source.end_line}\n{source.snippet}\n"
+
+
+def _evidence_packet(state: CaseFile, char_budget: int = EVIDENCE_CHAR_BUDGET) -> EvidencePacket:
+    """限制证据总预算；可引用白名单仅包含本轮完整展示的工具层片段。"""
     if char_budget < 0:
         raise ValueError("证据预算不能为负数")
     parts: list[str] = []
@@ -35,10 +42,12 @@ def _evidence(state: CaseFile, char_budget: int = EVIDENCE_CHAR_BUDGET) -> str:
     if state.risk_report is not None:
         parts.append("## 风险扫描结果\n" + state.risk_report.model_dump_json())
     if state.ingest is not None:
-        text = state.ingest.tree_text + "\n" + state.ingest.content_text
+        content = ("".join(_source_block(s) for s in state.ingest.sources)
+                   if state.ingest.sources else state.ingest.content_text)
+        text = state.ingest.tree_text[:600] + "\n" + content
         parts.append("## 仓库文本（预算内）\n" + text)
     if not parts:
-        return ""
+        return EvidencePacket()
     # 为每类证据保留份额，避免较大的依赖图挤掉风险与代码；总预算包含分隔符。
     available = max(0, char_budget - 2 * (len(parts) - 1))
     share = available // len(parts)
@@ -50,12 +59,31 @@ def _evidence(state: CaseFile, char_budget: int = EVIDENCE_CHAR_BUDGET) -> str:
         spare -= extra
     marker = "\n...[证据过长已截断]"
     bounded = []
-    for part, limit in zip(parts, allocations):
+    visible: list[SourceExcerpt] = []
+    for i, (part, limit) in enumerate(zip(parts, allocations)):
+        if i == len(parts) - 1 and state.ingest is not None and state.ingest.sources:
+            part = ("## 仓库文本（预算内）\n" + state.ingest.tree_text[:min(600, limit // 4)] + "\n")[:limit]
+            for source_index, source in enumerate(state.ingest.sources):
+                block = _source_block(source)
+                reserve = len(marker) if source_index < len(state.ingest.sources) - 1 else 0
+                if len(part) + len(block) + reserve > limit:
+                    break
+                part += block
+                visible.append(source)
+            if len(visible) < len(state.ingest.sources):
+                part += marker[:max(0, limit - len(part))]
+            bounded.append(part)
+            continue
         if len(part) > limit:
             suffix = marker[:limit]
             part = part[:limit - len(suffix)] + suffix
         bounded.append(part)
-    return "\n\n".join(bounded)[:char_budget]
+    return EvidencePacket(text="\n\n".join(bounded)[:char_budget], sources=visible)
+
+
+def _evidence(state: CaseFile, char_budget: int = EVIDENCE_CHAR_BUDGET) -> str:
+    """兼容只需要文本的调用方，引用校验使用完整 EvidencePacket。"""
+    return _evidence_packet(state, char_budget).text
 
 
 def _extract_json(raw: str) -> str:
@@ -97,8 +125,10 @@ def make_cartographer(llm):
     template = _load_prompt("cartographer")
 
     def node(state: CaseFile) -> dict:
-        verdict = _structured(llm, template.replace("<<<EVIDENCE>>>", _evidence(state)), DetectiveVerdict)
+        packet = _evidence_packet(state)
+        verdict = _structured(llm, template.replace("<<<EVIDENCE>>>", packet.text), DetectiveVerdict)
         verdict.agent = "cartographer"
+        verdict.evidence = resolve_citations(verdict.findings, verdict.citations, packet.sources)
         return {"verdict_cartographer": verdict}
 
     return node
@@ -108,8 +138,10 @@ def make_reader(llm):
     template = _load_prompt("reader")
 
     def node(state: CaseFile) -> dict:
-        verdict = _structured(llm, template.replace("<<<EVIDENCE>>>", _evidence(state)), DetectiveVerdict)
+        packet = _evidence_packet(state)
+        verdict = _structured(llm, template.replace("<<<EVIDENCE>>>", packet.text), DetectiveVerdict)
         verdict.agent = "reader"
+        verdict.evidence = resolve_citations(verdict.findings, verdict.citations, packet.sources)
         return {"verdict_reader": verdict}
 
     return node
@@ -119,8 +151,10 @@ def make_auditor(llm):
     template = _load_prompt("auditor")
 
     def node(state: CaseFile) -> dict:
-        verdict = _structured(llm, template.replace("<<<EVIDENCE>>>", _evidence(state)), DetectiveVerdict)
+        packet = _evidence_packet(state)
+        verdict = _structured(llm, template.replace("<<<EVIDENCE>>>", packet.text), DetectiveVerdict)
         verdict.agent = "auditor"
+        verdict.evidence = resolve_citations(verdict.findings, verdict.citations, packet.sources)
         return {"verdict_auditor": verdict}
 
     return node
@@ -143,15 +177,20 @@ def make_chief(llm):
     template = _load_prompt("chief")
 
     def node(state: CaseFile) -> dict:
+        packet = _evidence_packet(state, char_budget=6_000)
         verdicts = [
             v
             for v in (state.verdict_cartographer, state.verdict_reader, state.verdict_auditor)
             if v is not None
         ]
         try:
-            prompt = template.replace("<<<VERDICTS>>>", json.dumps([v.model_dump() for v in verdicts], ensure_ascii=False))
-            prompt = prompt.replace("<<<EVIDENCE>>>", _evidence(state, char_budget=6_000))
+            summaries = [v.model_dump(exclude={"evidence", "citations"}) for v in verdicts]
+            for summary, verdict in zip(summaries, verdicts):
+                summary["evidence"] = [e.model_dump(exclude={"sources"}) for e in verdict.evidence]
+            prompt = template.replace("<<<VERDICTS>>>", json.dumps(summaries, ensure_ascii=False)[:6_000])
+            prompt = prompt.replace("<<<EVIDENCE>>>", packet.text)
             report = _structured(llm, prompt, FinalReport)
+            report.degraded = False
         except RuntimeError:
             report = _degraded_report(state)
         # 确定性优先：架构图由依赖图渲染（AGENTS.md §2.8），评分由编排层回填
@@ -160,6 +199,21 @@ def make_chief(llm):
 
             report.mermaid = mermaid_from_repo_map(state.repo_map)
         report.scores = {v.agent: v.score for v in verdicts}
+        if state.repo is not None:
+            report.repo_name = state.repo.name
+        if report.degraded and state.risk_report is not None:
+            report.risk_citations = [CitationRequest(
+                claim_index=i,
+                source_ids=[source.id for source in packet.sources
+                            if source.path == finding.path and source.start_line <= finding.line <= source.end_line][:3],
+            ) for i, finding in enumerate(state.risk_report.findings[:6])]
+        report.onboarding_evidence = resolve_citations(report.onboarding, report.onboarding_citations, packet.sources)
+        report.risk_evidence = resolve_citations(report.risks, report.risk_citations, packet.sources)
+        if report.degraded:
+            for evidence in report.onboarding_evidence:
+                evidence.basis = "fallback"
+            for evidence in report.risk_evidence:
+                evidence.basis = "rule"
         return {"report": report}
 
     return node

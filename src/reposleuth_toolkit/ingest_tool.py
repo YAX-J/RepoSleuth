@@ -10,7 +10,8 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-from .models import IngestResult
+from .evidence_tool import build_source_excerpts
+from .models import IngestResult, RepoInfo, SourceExcerpt
 from .text_safety import redact_sensitive_text
 
 SKIP_DIRS = {
@@ -38,7 +39,7 @@ def _build_tree(root: Path, max_entries: int = 400) -> str:
             if count >= max_entries:
                 lines.append(f"{prefix}...(超过 {max_entries} 条，已截断)")
                 return True
-            if entry.name in SKIP_DIRS:
+            if entry.name in SKIP_DIRS or entry.is_symlink():
                 continue
             if entry.is_dir():
                 lines.append(f"{prefix}{entry.name}/")
@@ -56,9 +57,11 @@ def _build_tree(root: Path, max_entries: int = 400) -> str:
 
 def _iter_text_files(root: Path):
     for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS)
+        dirnames[:] = sorted(d for d in dirnames if d not in SKIP_DIRS and not (Path(dirpath) / d).is_symlink())
         for name in sorted(filenames):
             p = Path(dirpath) / name
+            if p.is_symlink():
+                continue
             if name.lower() == ".env" or name.lower().startswith(".env."):
                 continue
             if p.suffix.lower() in TEXT_EXTS or name.lower() in TEXT_FILES:
@@ -69,12 +72,15 @@ def ingest_repo(
     repo_path: str | Path,
     max_total_chars: int = 200_000,
     max_file_chars: int = 8_000,
+    *,
+    repo: RepoInfo | None = None,
 ) -> IngestResult:
     """目录树 + 代码内容拼装，总字符不超过 max_total_chars。
 
     - 排除 .env 及其变体，常见凭据赋值与私钥先脱敏，再截断；
     - 单文件超过 max_file_chars 先截断（保留开头，通常含 imports/签名）；
     - 预算耗尽后剩余文件记入 truncated_files，供 Agent 决定是否精读。
+    - sources 包含已纳入文本的脱敏源码片段；repo 仅用于生成固定 commit 链接。
     """
     if max_total_chars < 0 or max_file_chars < 0:
         raise ValueError("字符预算不能为负数")
@@ -83,6 +89,7 @@ def ingest_repo(
 
     parts: list[str] = []
     truncated: list[str] = []
+    sources: list[SourceExcerpt] = []
     budget = max_total_chars - len(tree_text)
 
     for path in _iter_text_files(root):
@@ -95,14 +102,17 @@ def ingest_repo(
         except OSError:
             continue
         text = redact_sensitive_text(text)
-        if len(text) > max_file_chars:
-            text = text[:max_file_chars] + "\n...[文件过长已截断]"
+        file_truncated = len(text) > max_file_chars
+        text = text[:max_file_chars]
         header = f"\n### {rel}\n"
-        chunk = header + text
+        chunk = header + text + ("\n...[文件过长已截断]" if file_truncated else "")
         if len(chunk) > budget:
             truncated.append(rel)
             continue
         parts.append(chunk)
+        sources.extend(build_source_excerpts(rel, text, len(sources) + 1, repo))
+        if file_truncated:
+            truncated.append(rel)
         budget -= len(chunk)
 
     content_text = "".join(parts)
@@ -112,4 +122,5 @@ def ingest_repo(
         content_text=content_text,
         truncated_files=truncated,
         total_chars=len(tree_text) + len(content_text),
+        sources=sources,
     )

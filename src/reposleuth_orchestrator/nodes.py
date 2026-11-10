@@ -23,5 +23,5 @@ def survey_node(state: CaseFile) -> dict:
     return {
         "repo_map": analyze_repo_map(path, repo_name=state.repo.name),
         "risk_report": scan_risks(path),
-        "ingest": ingest_repo(path),
+        "ingest": ingest_repo(path, repo=state.repo),
     }

@@ -187,7 +187,8 @@ def investigate(req: InvestigateRequest) -> StreamingResponse:
                         if v is not None:
                             d = _dump(v)
                             yield _sse({"type": "verdict", "agent": node, "score": d["score"],
-                                        "findings": d.get("findings", []), "notes": d.get("notes", "")})
+                                        "findings": d.get("findings", []), "notes": d.get("notes", ""),
+                                        "evidence": d.get("evidence", [])})
                     elif node == "chief":
                         case = CaseFile.model_validate(state)
                         report = case.report
@@ -201,6 +202,9 @@ def investigate(req: InvestigateRequest) -> StreamingResponse:
                                 "risks": report.risks,
                                 "scores": report.scores,
                                 "degraded": report.degraded,
+                                "revision": case.repo.commit_sha if case.repo else "",
+                                "onboarding_evidence": [e.model_dump(mode="json") for e in report.onboarding_evidence],
+                                "risk_evidence": [e.model_dump(mode="json") for e in report.risk_evidence],
                                 "markdown": render_markdown(case),
                                 "stats": case.repo_map.stats if case.repo_map else {},
                             }})

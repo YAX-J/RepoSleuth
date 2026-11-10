@@ -11,6 +11,8 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 
 from reposleuth_toolkit.models import (
+    CitationRequest,
+    ClaimEvidence,
     IngestResult,
     RepoCandidate,
     RepoInfo,
@@ -26,6 +28,8 @@ class DetectiveVerdict(BaseModel):
     score: int = Field(ge=0, le=10, description="该视角评分")
     findings: list[str] = Field(default_factory=list, description="关键发现")
     notes: str = Field(default="", description="一句话总评")
+    citations: list[CitationRequest] = Field(default_factory=list, max_length=10)
+    evidence: list[ClaimEvidence] = Field(default_factory=list)
 
 
 class FinalReport(BaseModel):
@@ -37,6 +41,10 @@ class FinalReport(BaseModel):
     risks: list[str] = Field(default_factory=list, description="风险清单，<=6 条")
     scores: dict[str, int] = Field(default_factory=dict, description="各侦探评分，由编排层回填")
     degraded: bool = Field(default=False, description="主笔 LLM 失败时降级生成，文字部分为确定性兜底")
+    onboarding_citations: list[CitationRequest] = Field(default_factory=list, max_length=10)
+    risk_citations: list[CitationRequest] = Field(default_factory=list, max_length=12)
+    onboarding_evidence: list[ClaimEvidence] = Field(default_factory=list)
+    risk_evidence: list[ClaimEvidence] = Field(default_factory=list)
 
 
 class RankedCandidate(BaseModel):

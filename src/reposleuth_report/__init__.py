@@ -6,10 +6,11 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 
 from reposleuth_orchestrator.state import CaseFile
-from reposleuth_toolkit.models import RepoMap
+from reposleuth_toolkit.models import ClaimEvidence, RepoMap, SourceExcerpt
 
 SCORE_LABELS = {
     "cartographer": "架构（Cartographer）",
@@ -62,6 +63,20 @@ def mermaid_from_repo_map(repo_map: RepoMap, max_nodes: int = 10, max_edges: int
     return "\n".join(lines)
 
 
+def _citation_suffix(evidence: ClaimEvidence | None) -> str:
+    if evidence is None:
+        return "（模型推断；未提供引用）"
+    basis = {"rule": "规则发现", "model": "模型推断", "fallback": "兜底建议"}[evidence.basis]
+    if evidence.status != "verified" or not evidence.sources:
+        return f"（{basis}；{evidence.reason or '未提供有效引用'}）"
+    links = []
+    for source in evidence.sources:
+        path = re.sub(r"([\\`*_{}\[\]()<>])", r"\\\1", source.path)
+        label = f"{path}:{source.start_line}-{source.end_line}"
+        links.append(f"[{label}](#source-{source.id})")
+    return f"（{basis}；引用位置已校验：{'、'.join(links)}）"
+
+
 def render_markdown(case: CaseFile) -> str:
     """渲染最终报告 Markdown；未走完流水线（缺 report）时抛 ValueError。"""
     report = case.report
@@ -76,6 +91,9 @@ def render_markdown(case: CaseFile) -> str:
     }
 
     lines: list[str] = [f"# RepoSleuth 报告 · {report.repo_name}", ""]
+    if case.repo is not None:
+        lines += [f"分析版本：{case.repo.commit_sha or '本地快照（未固定 Git 提交）'}", ""]
+    lines += ["引用校验仅确认源码位置与本轮证据一致；模型结论仍需结合代码判断。", ""]
 
     lines += ["## 综合评分", ""]
     for agent, label in SCORE_LABELS.items():
@@ -86,14 +104,37 @@ def render_markdown(case: CaseFile) -> str:
     lines += ["## 架构图", "", "```mermaid", report.mermaid, "```", ""]
 
     lines += ["## 新人上手路线", ""]
-    lines += [f"{i}. {step}" for i, step in enumerate(report.onboarding, 1)]
+    lines += [f"{i + 1}. {step} " + _citation_suffix(next(
+        (e for e in report.onboarding_evidence if e.claim_index == i), None,
+    )) for i, step in enumerate(report.onboarding)]
     lines.append("")
 
     lines += ["## 风险清单", ""]
     if report.risks:
-        lines += [f"- [ ] {risk}" for risk in report.risks]
+        lines += [f"- [ ] {risk} " + _citation_suffix(next(
+            (e for e in report.risk_evidence if e.claim_index == i), None,
+        )) for i, risk in enumerate(report.risks)]
     else:
         lines.append("- 未发现风险")
+
+    cited: dict[str, SourceExcerpt] = {}
+    for evidence in [*report.onboarding_evidence, *report.risk_evidence]:
+        if evidence.status == "verified":
+            for source in evidence.sources:
+                cited.setdefault(source.id, source)
+    if cited:
+        lines += ["", "## 源码证据（已脱敏）", ""]
+        for source in cited.values():
+            lines += [f'<a id="source-{source.id}"></a>', "",
+                      f"### {source.id} · {source.path}:{source.start_line}-{source.end_line}", ""]
+            if source.url:
+                lines += [f"[查看该提交的源码]({source.url})", ""]
+            fence = "`" * max(3, max((len(s) + 1 for s in re.findall(r"`+", source.snippet)), default=3))
+            lines += [f"{fence}text", source.snippet, fence, ""]
+
+    if case.ingest is not None:
+        lines += ["", f"文本采集：{len(case.ingest.sources)} 段源码；"
+                  f"{len(case.ingest.truncated_files)} 个文件因预算发生截断或未纳入。", ""]
 
     if case.repo_map is not None:
         stats = case.repo_map.stats
